@@ -5,9 +5,9 @@ Hub WiFi con **ESP32-WROOM-32** y **ESPHome** para **Home Assistant**. Captura, 
 ## Índice
 
 1. [Hardware objetivo](#hardware-objetivo)
-2. [Capturas del firmware](#capturas-del-firmware)
-3. [Funciones principales](#funciones-principales)
-4. [Signal Tools / IR](#signal-tools--ir)
+2. [Funciones principales](#funciones-principales)
+3. [Signal Tools / IR](#signal-tools--ir)
+4. [Galería](#galería)
 5. [Componentes usados](#componentes-usados)
 6. [Diagramas de conexiones completas](#diagramas-de-conexiones-completas)
 7. [Pinouts de referencia](#pinouts-de-referencia)
@@ -15,7 +15,8 @@ Hub WiFi con **ESP32-WROOM-32** y **ESPHome** para **Home Assistant**. Captura, 
 9. [Botones](#botones)
 10. [Diagrama visual de conexiones](#diagrama-visual-de-conexiones)
 11. [Pin map rápido](#pin-map-rápido)
-12. [Límites conocidos](#límites-conocidos)
+12. [Código YAML](#código-yaml)
+13. [Límites conocidos](#límites-conocidos)
 
 ## Hardware objetivo
 
@@ -23,17 +24,6 @@ Hub WiFi con **ESP32-WROOM-32** y **ESPHome** para **Home Assistant**. Captura, 
 - **Firmware:** ESPHome (archivo `esp32_ir_rf_rfid.yaml`)
 - **Integración:** Home Assistant (API cifrada, sin contraseña OTA)
 - **Nombre del dispositivo:** `ir-rf-rfid-wifi-hub`
-
-## Capturas del firmware
-
-Coloca tus capturas en la carpeta `screenshots/` y enlázalas aquí:
-
-| Vista | Archivo |
-|---|---|
-| Panel del dispositivo en Home Assistant | `screenshots/ha-device.png` |
-| IR Analyzer / Sniffer en vivo | `screenshots/ir-analyzer.png` |
-| Capturas guardadas y controles | `screenshots/ir-slots.png` |
-| Lectura RFID y tags | `screenshots/rfid-tags.png` |
 
 ## Funciones principales
 
@@ -54,6 +44,26 @@ Coloca tus capturas en la carpeta `screenshots/` y enlázalas aquí:
 | **Protocol Scan** | Clasifica la señal como NEC, Samsung, LG, Sony, Panasonic, RC5, RC6 o RAW. |
 | **IR Sniffer** | Registra eventos en vivo con protocolo, código, bits, duración y repeticiones. |
 | **RF Capture / Replay** | Captura y reproduce señales RF de 433 MHz. |
+
+## Galería
+
+<table>
+<tr>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/ESP32_WROOM_32.jpg" width="240" alt="ESP32-WROOM-32"><br><sub>ESP32-WROOM-32</sub></td>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RFID_Module_RC522.jpg" width="240" alt="Módulo RFID RC522"><br><sub>Módulo RFID RC522</sub></td>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RF_2.jpg" width="240" alt="Módulos RF 433 MHz"><br><sub>Módulos RF 433 MHz</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/IR_1.jpg" width="240" alt="Módulo IR"><br><sub>Módulo IR</sub></td>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/FF_Cables.jpg" width="240" alt="Cables Dupont F/F"><br><sub>Cables Dupont F/F</sub></td>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RF_1.jpg" width="240" alt="Diagrama eléctrico RF"><br><sub>Diagrama eléctrico RF</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/IR_2.jpg" width="240" alt="Diagrama IR con USB-TTL"><br><sub>Diagrama IR con USB-TTL</sub></td>
+<td></td>
+<td></td>
+</tr>
+</table>
 
 ## Componentes usados
 
@@ -205,6 +215,34 @@ Entidades que aparecen en Home Assistant:
 | 32 | RF RX | Entrada |
 | 21 | I2C SDA (RC522) | Bidireccional |
 | 22 | I2C SCL (RC522) | Salida |
+
+## Código YAML
+
+Configuración completa de ESPHome para el hub.
+
+**Descargar:** [wifi_hub_for_ir_rf_rfid_v1.0.yaml](https://github.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/blob/main/wifi_hub_for_ir_rf_rfid_v1.0.yaml)
+
+### Uso
+
+1. Descarga el archivo `wifi_hub_for_ir_rf_rfid_v1.0.yaml`.
+2. Crea o edita tu `secrets.yaml` con `wifi_ssid`, `wifi_password` y `api_key`.
+3. Cárgalo en ESPHome (Device Builder o `esphome run`) y flashea el ESP32 por USB la primera vez.
+4. Añade el dispositivo en Home Assistant (Ajustes → Dispositivos y servicios → ESPHome).
+5. Activa "Permitir que el dispositivo realice acciones de Home Assistant" para recibir los avisos.
+
+### Pines configurables
+
+```yaml
+substitutions:
+  name: ir-rf-rfid-wifi-hub
+  friendly_name: "IR RF RFID WIFI HUB"
+  ir_rx_pin: GPIO14
+  ir_tx_pin: GPIO25
+  rf_rx_pin: GPIO32
+  rf_tx_pin: GPIO26
+  sda_pin: GPIO21
+  scl_pin: GPIO22
+```
 
 ## Límites conocidos
 
