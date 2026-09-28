@@ -467,7 +467,7 @@ select:
     optimistic: true
     set_action:
       - lambda: |-
-          id(slot_idx) = x.back() - '1';
+          id(slot_idx) = x.c_str()[x.size() - 1] - '1';
           id(ir_slot_name).publish_state(std::string(&id(ir_names)[id(slot_idx) * 24]));
 
 text:
