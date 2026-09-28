@@ -1,0 +1,689 @@
+# =====================================================================
+#  ESPHome - IR RF RFID WIFI HUB  (ESP32 WROOM-32)
+#  - IR: Raw Capture, Replay 38 kHz, Saved Captures (4 slots), Remotes,
+#        Analyzer, Protocol Scan, Sniffer
+#  - RF 433 MHz: Capture / Replay
+#  - RFID RC522 (I2C): leer, guardar UID, enviar Tag a Home Assistant
+#
+#  CABLEADO SUGERIDO (ESP32 WROOM-32)
+#   RC522 (I2C)  : SDA=GPIO21  SCL=GPIO22  V=3.3V  G=GND   (addr 0x28)
+#   IR RX (VS1838B/TSOP) : OUT=GPIO14  (3.3V)
+#   IR TX (LED + transistor NPN, resistencia base 1k) : GPIO25
+#   RF RX 433 MHz : DATA=GPIO32  (alimentar a 3.3V o usar divisor si es 5V)
+#   RF TX 433 MHz : DATA=GPIO26
+#  Evita GPIO 6-11 (flash) y cuidado con 0,2,12,15 (strapping).
+#
+#  secrets.yaml necesita: wifi_ssid, wifi_password, api_key
+# =====================================================================
+
+substitutions:
+  name: ir-rf-rfid-wifi-hub
+  friendly_name: "IR RF RFID WIFI HUB"
+  ir_rx_pin: GPIO14
+  ir_tx_pin: GPIO25
+  rf_rx_pin: GPIO32
+  rf_tx_pin: GPIO26
+  sda_pin: GPIO21
+  scl_pin: GPIO22
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(ir_analyzer).publish_state("IDLE");
+          id(ir_protocol).publish_state("-");
+          id(ir_sniffer).publish_state("-");
+          id(rf_status).publish_state("RF listo");
+          id(rfid_status).publish_state("Esperando tarjeta");
+          id(ir_slot_name).publish_state(std::string(&id(ir_names)[0]));
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name}-fallback"
+    password: "12345678"
+
+captive_portal:
+
+# ---------------------------------------------------------------------
+#  BUSES
+# ---------------------------------------------------------------------
+i2c:
+  sda: ${sda_pin}
+  scl: ${scl_pin}
+  scan: true
+  frequency: 100kHz
+
+# ---------------------------------------------------------------------
+#  GLOBALES
+# ---------------------------------------------------------------------
+globals:
+  # Ultima captura (RAM)
+  - id: last_ir
+    type: std::vector<int32_t>
+  - id: last_rf
+    type: std::vector<int32_t>
+
+  # Capturas IR guardadas (persisten al reiniciar): 4 slots x 256 pulsos
+  - id: ir_slots
+    type: uint16_t[1024]
+    restore_value: true
+  - id: ir_lens
+    type: int[4]
+    restore_value: true
+  - id: ir_names          # 4 nombres x 24 chars
+    type: char[96]
+    restore_value: true
+  - id: slot_idx
+    type: int
+    initial_value: '0'
+
+  # Captura RF guardada (1 slot persistente)
+  - id: rf_slot
+    type: uint16_t[300]
+    restore_value: true
+  - id: rf_len
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+  # Estado del analizador IR
+  - id: ir_decoded
+    type: bool
+    initial_value: 'false'
+  - id: ir_proto
+    type: std::string
+  - id: ir_code
+    type: std::string
+  - id: ir_prev_code
+    type: std::string
+  - id: ir_bits
+    type: int
+    initial_value: '0'
+  - id: ir_dur
+    type: int
+    initial_value: '0'
+  - id: ir_pulses
+    type: int
+    initial_value: '0'
+  - id: ir_rep
+    type: int
+    initial_value: '0'
+  - id: ir_last_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: ir_busy
+    type: bool
+    initial_value: 'false'
+  - id: rf_busy
+    type: bool
+    initial_value: 'false'
+  - id: rf_last_notify
+    type: uint32_t
+    initial_value: '0'
+
+# ---------------------------------------------------------------------
+#  IR  -  RECEPTOR / TRANSMISOR
+# ---------------------------------------------------------------------
+remote_receiver:
+  - id: ir_rx
+    pin:
+      number: ${ir_rx_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    dump: all               # loguea todos los protocolos + raw
+    tolerance: 25%
+    filter: 50us
+    idle: 20ms
+    buffer_size: 4kb
+
+    # ---- RAW CAPTURE (+ base del Analyzer / Sniffer) ----
+    on_raw:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(ir_busy);'
+            then:
+              - lambda: |-
+                  int total = 0;
+                  for (auto v : x) total += abs(v);
+                  id(ir_pulses) = x.size();
+                  id(ir_dur) = total / 1000;
+                  if (id(ir_capture_enable).state && x.size() >= 4) {
+                    id(last_ir) = x;
+                    id(ir_capture_info).publish_state(str_sprintf("%d pulsos / %d ms", (int) x.size(), total / 1000));
+                  }
+              - script.execute: ir_finalize
+
+    # ---- PROTOCOL SCAN ----
+    on_nec:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "NEC"
+            code: !lambda 'return str_sprintf("0x%04X:0x%04X", x.address, x.command);'
+            bits: 32
+    on_samsung:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "SAMSUNG"
+            code: !lambda 'return str_sprintf("0x%08X", (unsigned) x.data);'
+            bits: !lambda 'return (int) x.nbits;'
+    on_lg:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "LG"
+            code: !lambda 'return str_sprintf("0x%08X", (unsigned) x.data);'
+            bits: !lambda 'return (int) x.nbits;'
+    on_sony:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "SONY"
+            code: !lambda 'return str_sprintf("0x%08X", (unsigned) x.data);'
+            bits: !lambda 'return (int) x.nbits;'
+    on_panasonic:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "PANASONIC"
+            code: !lambda 'return str_sprintf("0x%04X:0x%08X", x.address, (unsigned) x.command);'
+            bits: 48
+    on_rc5:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "RC5"
+            code: !lambda 'return str_sprintf("0x%02X:0x%02X", x.address, x.command);'
+            bits: 14
+    on_rc6:
+      then:
+        - script.execute:
+            id: ir_decoded_evt
+            proto: "RC6"
+            code: !lambda 'return str_sprintf("0x%02X:0x%02X", x.address, x.command);'
+            bits: 20
+
+  # ---- RF 433 MHz (receptor) ----
+  - id: rf_rx
+    pin:
+      number: ${rf_rx_pin}
+      inverted: false
+      mode:
+        input: true
+    dump: raw
+    tolerance: 30%
+    filter: 150us
+    idle: 8ms
+    buffer_size: 4kb
+    on_raw:
+      then:
+        - if:
+            condition:
+              lambda: 'return !id(rf_busy) && id(rf_capture_enable).state && x.size() >= 20;'
+            then:
+              - lambda: |-
+                  id(last_rf) = x;
+                  id(rf_status).publish_state(str_sprintf("RF capturado: %d pulsos", (int) x.size()));
+              - if:
+                  condition:
+                    lambda: 'return id(rf_notify).state && (millis() - id(rf_last_notify)) > 2000;'
+                  then:
+                    - lambda: 'id(rf_last_notify) = millis();'
+                    - homeassistant.action:
+                        action: persistent_notification.create
+                        data:
+                          title: "RF detectado"
+                          message: !lambda 'return str_sprintf("Senal RF capturada: %d pulsos", (int) x.size());'
+                          notification_id: esp_rf_detected
+                    - homeassistant.event:
+                        event: esphome.rf_detected
+                        data:
+                          pulses: !lambda 'return to_string((int) x.size());'
+                          device: ${name}
+
+remote_transmitter:
+  - id: ir_tx
+    pin: ${ir_tx_pin}
+    carrier_duty_percent: 50%
+    non_blocking: true
+  - id: rf_tx
+    pin: ${rf_tx_pin}
+    carrier_duty_percent: 100%     # OOK sin portadora
+    non_blocking: true
+
+# ---------------------------------------------------------------------
+#  SCRIPTS
+# ---------------------------------------------------------------------
+script:
+  # Envia una senal IR raw con portadora de 38 kHz
+  - id: ir_send
+    mode: queued
+    parameters:
+      data: int[]
+    then:
+      - lambda: 'id(ir_busy) = true;'
+      - remote_transmitter.transmit_raw:
+          transmitter_id: ir_tx
+          carrier_frequency: 38kHz
+          code: !lambda 'return std::vector<int32_t>(data.begin(), data.end());'
+      - delay: 400ms
+      - lambda: 'id(ir_busy) = false;'
+
+  # Reproduce un slot guardado
+  - id: ir_play_slot
+    mode: queued
+    parameters:
+      slot: int
+    then:
+      - lambda: |-
+          int n = id(ir_lens)[slot];
+          if (n <= 0) { ESP_LOGW("ir", "Slot %d vacio", slot + 1); return; }
+          std::vector<int> v;
+          for (int i = 0; i < n; i++) {
+            int d = id(ir_slots)[slot * 256 + i];
+            v.push_back((i % 2 == 0) ? d : -d);
+          }
+          id(ir_send).execute(v);
+
+  # Evento de protocolo decodificado
+  - id: ir_decoded_evt
+    mode: single
+    parameters:
+      proto: string
+      code: string
+      bits: int
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(ir_busy);'
+          then:
+            - lambda: |-
+                id(ir_decoded) = true;
+                id(ir_proto) = proto;
+                id(ir_code) = code;
+                id(ir_bits) = bits;
+            - script.execute: ir_finalize
+
+  # Espera 150 ms para juntar raw + protocolo y clasifica el evento
+  - id: ir_finalize
+    mode: restart
+    then:
+      - delay: 150ms
+      - lambda: |-
+          uint32_t now = millis();
+          bool within = (now - id(ir_last_ms)) < 300;
+          std::string st;
+          if (id(ir_decoded)) {
+            st = (within && id(ir_code) == id(ir_prev_code)) ? "REPEAT" : "FRAME";
+          } else {
+            int p = id(ir_pulses);
+            if (p < 4) st = "NOISE";
+            else if (p == 4) st = within ? "REPEAT" : "NOISE";
+            else st = "FRAME";
+            id(ir_proto) = (st == "NOISE") ? "NOISE" : "RAW";
+            id(ir_code) = "-";
+            id(ir_bits) = p / 2;
+          }
+          if (st == "REPEAT") id(ir_rep)++;
+          else id(ir_rep) = 0;
+          id(ir_analyzer).publish_state(st);
+          id(ir_protocol).publish_state(id(ir_proto));
+          id(ir_sniffer).publish_state(str_sprintf("%s | %s | %d bits | %d ms | rep %d",
+              id(ir_proto).c_str(), id(ir_code).c_str(), id(ir_bits), id(ir_dur), id(ir_rep)));
+          ESP_LOGI("ir_sniffer", "%s | %s | %d bits | %d ms | rep %d | %s",
+              id(ir_proto).c_str(), id(ir_code).c_str(), id(ir_bits), id(ir_dur), id(ir_rep), st.c_str());
+          id(ir_prev_code) = id(ir_code);
+          id(ir_last_ms) = now;
+          id(ir_decoded) = false;
+      # Aviso a Home Assistant solo en FRAME nuevo (no REPEAT ni NOISE)
+      - if:
+          condition:
+            lambda: 'return id(ir_notify).state && id(ir_analyzer).state == "FRAME";'
+          then:
+            - homeassistant.action:
+                action: persistent_notification.create
+                data:
+                  title: "IR detectado"
+                  message: !lambda 'return id(ir_sniffer).state;'
+                  notification_id: esp_ir_detected
+            - homeassistant.event:
+                event: esphome.ir_detected
+                data:
+                  protocol: !lambda 'return id(ir_proto);'
+                  code: !lambda 'return id(ir_code);'
+                  bits: !lambda 'return to_string(id(ir_bits));'
+                  device: ${name}
+
+  # Envia RF (repite 5 veces, como los mandos 433)
+  - id: rf_send
+    mode: queued
+    parameters:
+      data: int[]
+    then:
+      - lambda: 'id(rf_busy) = true;'
+      - remote_transmitter.transmit_raw:
+          transmitter_id: rf_tx
+          code: !lambda 'return std::vector<int32_t>(data.begin(), data.end());'
+          repeat:
+            times: 5
+            wait_time: 15ms
+      - delay: 300ms
+      - lambda: 'id(rf_busy) = false;'
+
+# ---------------------------------------------------------------------
+#  INTERVAL: el Analyzer vuelve a IDLE
+# ---------------------------------------------------------------------
+interval:
+  - interval: 250ms
+    then:
+      - lambda: |-
+          if (millis() - id(ir_last_ms) > 700 && id(ir_analyzer).state != "IDLE")
+            id(ir_analyzer).publish_state("IDLE");
+
+# ---------------------------------------------------------------------
+#  RFID RC522 (I2C)
+# ---------------------------------------------------------------------
+rc522_i2c:
+  id: rfid
+  address: 0x28
+  update_interval: 500ms
+  on_tag:
+    then:
+      - lambda: |-
+          id(rfid_uid).publish_state(x);
+          id(rfid_status).publish_state("Tarjeta leida: " + x);
+          id(rfid_present).publish_state(true);
+      # Registra / dispara el tag en Home Assistant (Ajustes > Etiquetas)
+      - homeassistant.tag_scanned: !lambda 'return x;'
+  on_tag_removed:
+    then:
+      - lambda: |-
+          id(rfid_present).publish_state(false);
+          id(rfid_status).publish_state("Esperando tarjeta");
+
+# ---------------------------------------------------------------------
+#  SWITCHES
+# ---------------------------------------------------------------------
+switch:
+  - platform: template
+    name: "Notificar IR en HA"
+    id: ir_notify
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:bell-ring
+  - platform: template
+    name: "Notificar RF en HA"
+    id: rf_notify
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:bell-ring
+  - platform: template
+    name: "IR Capture Activa"
+    id: ir_capture_enable
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:record-rec
+  - platform: template
+    name: "RF Capture Activa"
+    id: rf_capture_enable
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:record-rec
+
+# ---------------------------------------------------------------------
+#  SELECT / TEXT  (slots de capturas guardadas)
+# ---------------------------------------------------------------------
+select:
+  - platform: template
+    name: "IR Slot"
+    id: ir_slot_sel
+    icon: mdi:content-save-cog
+    options: ["Slot 1", "Slot 2", "Slot 3", "Slot 4"]
+    initial_option: "Slot 1"
+    optimistic: true
+    set_action:
+      - lambda: |-
+          id(slot_idx) = x.back() - '1';
+          id(ir_slot_name).publish_state(std::string(&id(ir_names)[id(slot_idx) * 24]));
+
+text:
+  - platform: template
+    name: "IR Slot Nombre"
+    id: ir_slot_name
+    mode: text
+    max_length: 23
+    optimistic: true
+    icon: mdi:rename-box
+    set_action:
+      - lambda: |-
+          int s = id(slot_idx);
+          // Renombrar si el slot tiene datos; si no, se usa el nombre al guardar
+          if (id(ir_lens)[s] > 0) {
+            strncpy(&id(ir_names)[s * 24], x.c_str(), 23);
+            id(ir_names)[s * 24 + 23] = 0;
+          }
+  - platform: template
+    name: "RFID UID Guardado"
+    id: rfid_saved_uid
+    mode: text
+    max_length: 40
+    optimistic: true
+    restore_value: true
+    icon: mdi:card-account-details
+
+# ---------------------------------------------------------------------
+#  BUTTONS
+# ---------------------------------------------------------------------
+button:
+  # ---------- IR Replay ----------
+  - platform: template
+    name: "IR Replay (ultima captura)"
+    icon: mdi:play
+    on_press:
+      - script.execute:
+          id: ir_send
+          data: !lambda 'return std::vector<int>(id(last_ir).begin(), id(last_ir).end());'
+
+  # ---------- Saved Captures ----------
+  - platform: template
+    name: "IR Guardar en Slot"
+    icon: mdi:content-save
+    on_press:
+      - lambda: |-
+          int s = id(slot_idx);
+          int n = std::min<int>(id(last_ir).size(), 256);
+          if (n <= 0) { ESP_LOGW("ir", "No hay captura para guardar"); return; }
+          if (n % 2 == 1) n--;
+          for (int i = 0; i < n; i++)
+            id(ir_slots)[s * 256 + i] = (uint16_t) std::min<int>(abs(id(last_ir)[i]), 65535);
+          id(ir_lens)[s] = n;
+          std::string nm = id(ir_slot_name).state;
+          if (nm.empty()) nm = "Captura " + std::to_string(s + 1);
+          strncpy(&id(ir_names)[s * 24], nm.c_str(), 23);
+          id(ir_names)[s * 24 + 23] = 0;
+          id(ir_slot_name).publish_state(nm);
+  - platform: template
+    name: "IR Reproducir Slot"
+    icon: mdi:play-circle
+    on_press:
+      - script.execute:
+          id: ir_play_slot
+          slot: !lambda 'return id(slot_idx);'
+  - platform: template
+    name: "IR Cargar Slot como Ultima"
+    icon: mdi:upload
+    on_press:
+      - lambda: |-
+          int s = id(slot_idx);
+          int n = id(ir_lens)[s];
+          id(last_ir).clear();
+          for (int i = 0; i < n; i++) {
+            int d = id(ir_slots)[s * 256 + i];
+            id(last_ir).push_back((i % 2 == 0) ? d : -d);
+          }
+  - platform: template
+    name: "IR Borrar Slot"
+    icon: mdi:delete
+    on_press:
+      - lambda: |-
+          int s = id(slot_idx);
+          id(ir_lens)[s] = 0;
+          id(ir_names)[s * 24] = 0;
+          id(ir_slot_name).publish_state("");
+
+  # ---------- IR Remotes (controles virtuales -> slots) ----------
+  - platform: template
+    name: "Control IR - Boton 1"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: ir_play_slot, slot: 0}
+  - platform: template
+    name: "Control IR - Boton 2"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: ir_play_slot, slot: 1}
+  - platform: template
+    name: "Control IR - Boton 3"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: ir_play_slot, slot: 2}
+  - platform: template
+    name: "Control IR - Boton 4"
+    icon: mdi:remote
+    on_press:
+      - script.execute: {id: ir_play_slot, slot: 3}
+
+  # ---------- RF ----------
+  - platform: template
+    name: "RF Replay (ultima captura)"
+    icon: mdi:radio-tower
+    on_press:
+      - script.execute:
+          id: rf_send
+          data: !lambda 'return std::vector<int>(id(last_rf).begin(), id(last_rf).end());'
+  - platform: template
+    name: "RF Guardar Captura"
+    icon: mdi:content-save
+    on_press:
+      - lambda: |-
+          int n = std::min<int>(id(last_rf).size(), 300);
+          if (n <= 0) { id(rf_status).publish_state("Sin captura RF"); return; }
+          for (int i = 0; i < n; i++)
+            id(rf_slot)[i] = (uint16_t) std::min<int>(abs(id(last_rf)[i]), 65535);
+          id(rf_len) = n;
+          id(rf_status).publish_state(str_sprintf("RF guardado: %d pulsos", n));
+  - platform: template
+    name: "RF Replay Guardada"
+    icon: mdi:play-circle
+    on_press:
+      - lambda: |-
+          int n = id(rf_len);
+          if (n <= 0) { id(rf_status).publish_state("Slot RF vacio"); return; }
+          std::vector<int> v;
+          for (int i = 0; i < n; i++) {
+            int d = id(rf_slot)[i];
+            v.push_back((i % 2 == 0) ? d : -d);
+          }
+          id(rf_send).execute(v);
+
+  # ---------- RFID ----------
+  - platform: template
+    name: "RFID Guardar UID leido"
+    icon: mdi:content-copy
+    on_press:
+      - lambda: |-
+          id(rfid_saved_uid).publish_state(id(rfid_uid).state);
+          id(rfid_status).publish_state("UID guardado: " + id(rfid_uid).state);
+  - platform: template
+    name: "RFID Escribir o Clonar"
+    icon: mdi:card-plus
+    on_press:
+      # El componente rc522 de ESPHome NO incluye escritura.
+      # Aqui iria la llamada a un componente externo (ver notas).
+      - lambda: |-
+          ESP_LOGW("rfid", "Escritura/clonado no soportado por rc522 nativo. UID a clonar: %s",
+                   id(rfid_saved_uid).state.c_str());
+          id(rfid_status).publish_state("Escritura requiere componente externo");
+
+# ---------------------------------------------------------------------
+#  SENSORES DE TEXTO / BINARIOS
+# ---------------------------------------------------------------------
+text_sensor:
+  - platform: template
+    name: "IR Analyzer"
+    id: ir_analyzer
+    icon: mdi:waveform
+  - platform: template
+    name: "IR Protocol Scan"
+    id: ir_protocol
+    icon: mdi:magnify-scan
+  - platform: template
+    name: "IR Sniffer"
+    id: ir_sniffer
+    icon: mdi:eye
+  - platform: template
+    name: "IR Ultima Captura"
+    id: ir_capture_info
+    icon: mdi:information-outline
+  - platform: template
+    name: "IR Capturas Guardadas"
+    id: ir_slots_info
+    icon: mdi:format-list-bulleted
+    update_interval: 3s
+    lambda: |-
+      std::string s;
+      for (int i = 0; i < 4; i++) {
+        s += std::to_string(i + 1) + ": ";
+        if (id(ir_lens)[i] > 0) {
+          s += std::string(&id(ir_names)[i * 24]) + " (" + std::to_string(id(ir_lens)[i]) + ")";
+        } else s += "vacio";
+        if (i < 3) s += " | ";
+      }
+      return s;
+  - platform: template
+    name: "RF Estado"
+    id: rf_status
+    icon: mdi:radio-tower
+  - platform: template
+    name: "RFID Ultimo UID"
+    id: rfid_uid
+    icon: mdi:nfc-variant
+  - platform: template
+    name: "RFID Estado"
+    id: rfid_status
+    icon: mdi:card-search
+
+binary_sensor:
+  - platform: template
+    name: "RFID Tarjeta Presente"
+    id: rfid_present
+    device_class: presence
+
+  # Ejemplo: tarjeta especifica (descomenta y pon tu UID)
+  # - platform: rc522
+  #   uid: 74-10-37-94
+  #   name: "Tarjeta Llavero"
