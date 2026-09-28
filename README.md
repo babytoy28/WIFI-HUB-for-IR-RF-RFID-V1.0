@@ -50,7 +50,7 @@ Hub WiFi con **ESP32-WROOM-32** y **ESPHome** para **Home Assistant**. Captura, 
 <table>
 <tr>
 <td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/ESP32_WROOM_32.jpg" width="240" alt="ESP32-WROOM-32"><br><sub>ESP32-WROOM-32</sub></td>
-<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RFID_Module_RC522.jpg" width="240" alt="Módulo RFID RC522"><br><sub>Módulo RFID RC522</sub></td>
+<td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RFID_RC522.jpg" width="240" alt="Módulo RFID RC522"><br><sub>Módulo RFID RC522</sub></td>
 <td align="center"><img src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RF_2.jpg" width="240" alt="Módulos RF 433 MHz"><br><sub>Módulos RF 433 MHz</sub></td>
 </tr>
 <tr>
@@ -85,7 +85,7 @@ Female to Female multicolored Dupont jumper ribbon cables. [Ver en Amazon](https
 
 ### 3. Módulo RFID RC522, 13,56 MHz
 
-![RC522](https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RFID_Module_RC522.jpg)
+![RC522](https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/RFID_RC522.jpg)
 
 | Parámetro | Valor |
 |---|---|
