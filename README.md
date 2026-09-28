@@ -1,4 +1,4 @@
-# WIFI HUB for IR / RF / RFID V1.0
+# 📡WIFI HUB for IR / RF / RFID V1.0
 
 Hub WiFi con **ESP32-WROOM-32** y **ESPHome** para **Home Assistant**. Captura, analiza, guarda y reproduce señales **infrarrojas (IR)** y de **radiofrecuencia 433 MHz (RF)**, y lee tarjetas **RFID** con un módulo RC522 por I2C.
 
