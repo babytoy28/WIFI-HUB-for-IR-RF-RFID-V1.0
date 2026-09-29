@@ -187,8 +187,9 @@ Entidades que aparecen en Home Assistant:
 | Interruptores | IR Capture Activa, RF Capture Activa, Notificar IR en HA, Notificar RF en HA |
 | Selector / texto | IR Slot, IR Slot Nombre, RFID UID Guardado |
 
-## Diagrama visual de conexiones 
-(https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/diagrama.png)
+## Diagrama visual de conexiones
+
+![Diagrama visual de conexiones](https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/diagrama.png)
 
 ## Pin map rápido
 
@@ -236,5 +237,8 @@ substitutions:
 - **RFID:** el componente `rc522_i2c` de ESPHome solo lee UIDs. Escribir o clonar tarjetas requiere un componente externo y tarjetas "magic" (Gen1/Gen2). El botón "RFID Escribir o Clonar" es solo un marcador.
 - **Niveles de voltaje:** el ESP32 trabaja a 3,3 V en sus GPIO. Los módulos alimentados a 5 V (RC522, receptor RF, módulo IR) pueden entregar señales de 5 V, así que verifica las salidas con un multímetro y usa un divisor de tensión o un convertidor de nivel si es necesario.
 - **Módulo IR con chip NEC:** el firmware maneja el IR directamente por GPIO (receptor y emisor) y no usa el modo serie NEC del módulo. Confirma qué pines de señal expone tu placa.
+- **Versión de ESPHome:** probado con la sintaxis de ESPHome reciente (`transmitter_id`, `homeassistant.action`, `non_blocking`).
+- **Avisos a Home Assistant:** requieren activar "Permitir que el dispositivo realice acciones de Home Assistant" en la integración ESPHome.
+
 - **Versión de ESPHome:** probado con la sintaxis de ESPHome reciente (`transmitter_id`, `homeassistant.action`, `non_blocking`).
 - **Avisos a Home Assistant:** requieren activar "Permitir que el dispositivo realice acciones de Home Assistant" en la integración ESPHome.
