@@ -202,21 +202,7 @@ footer{padding:28px 0 40px;color:var(--mute);font-size:.9rem}
 <tr><td>RF TX</td><td>Transmisor RF <code>DATA</code></td><td>GPIO26</td><td>3,5-12 V</td></tr>
 </table></div>
 <h3>Diagrama visual de conexiones</h3>
-<pre>
-                   ┌─────────────────────┐
-   RC522 (I2C) ────┤ GPIO21  SDA         │
-               ────┤ GPIO22  SCL         │
-                   │                     │
-   IR RX ──────────┤ GPIO14              │
-   IR TX ◄─────────┤ GPIO25   ESP32      │
-                   │        WROOM-32     │
-   RF RX ──────────┤ GPIO32              │
-   RF TX ◄─────────┤ GPIO26              │
-                   │                     │
-   5V / VIN ───────┤ VIN  ──► RC522, IR, RF RX
-   GND ────────────┤ GND  ──► todos los módulos
-                   └─────────────────────┘
-</pre>
+<a href="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/diagrama.png"><img loading="lazy" alt="Diagrama visual de conexiones" src="https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/diagrama.png"></a>
 <p>Los diagramas eléctricos de cada módulo están en <a href="#componentes">Componentes usados</a>.</p>
 <h3>Pinouts de referencia</h3>
 <div class="tbl"><table>
