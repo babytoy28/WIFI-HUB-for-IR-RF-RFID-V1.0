@@ -187,23 +187,8 @@ Entidades que aparecen en Home Assistant:
 | Interruptores | IR Capture Activa, RF Capture Activa, Notificar IR en HA, Notificar RF en HA |
 | Selector / texto | IR Slot, IR Slot Nombre, RFID UID Guardado |
 
-## Diagrama visual de conexiones
-
-```
-                   ┌─────────────────────┐
-   RC522 (I2C) ────┤ GPIO21  SDA         │
-                ────┤ GPIO22  SCL         │
-                    │                     │
-   IR RX ──────────┤ GPIO14              │
-   IR TX ◄─────────┤ GPIO25   ESP32      │
-                    │        WROOM-32     │
-   RF RX ──────────┤ GPIO32              │
-   RF TX ◄─────────┤ GPIO26              │
-                    │                     │
-   5V / VIN ───────┤ VIN     ──► RC522, IR, RF RX
-   GND ────────────┤ GND     ──► todos los módulos
-                    └─────────────────────┘
-```
+## Diagrama visual de conexiones 
+(https://raw.githubusercontent.com/babytoy28/WIFI-HUB-for-IR-RF-RFID-V1.0/refs/heads/main/diagrama.png)
 
 ## Pin map rápido
 
