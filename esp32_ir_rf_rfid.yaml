@@ -163,7 +163,7 @@ remote_receiver:
       then:
         - if:
             condition:
-              lambda: 'return !id(ir_busy);'
+              lambda: 'return !id(ir_busy) && id(remote_raw_enable).state;'
             then:
               - lambda: |-
                   int total = 0;
@@ -243,7 +243,7 @@ remote_receiver:
       then:
         - if:
             condition:
-              lambda: 'return !id(rf_busy) && id(rf_capture_enable).state && x.size() >= 20;'
+              lambda: 'return !id(rf_busy) && id(remote_raw_enable).state && id(rf_capture_enable).state && x.size() >= 20;'
             then:
               - lambda: |-
                   id(last_rf) = x;
@@ -274,6 +274,50 @@ remote_transmitter:
     pin: ${rf_tx_pin}
     carrier_duty_percent: 100%     # OOK sin portadora
     non_blocking: true
+
+# ---------------------------------------------------------------------
+#  HAIR / Home Assistant Infrared nativo (HA 2026.4+ TX, 2026.6+ RX)
+# ---------------------------------------------------------------------
+# Registra el hub como entidades "infrared" de Home Assistant. HAIR las
+# detecta solo: la entidad TX envia comandos y la entidad RX alimenta
+# el Sniffer de HAIR.
+infrared:
+  - platform: ir_rf_proxy
+    name: "IR Proxy Transmitter"
+    id: ir_proxy_transmitter
+    remote_transmitter_id: ir_tx
+  - platform: ir_rf_proxy
+    name: "IR Proxy Receiver"
+    id: ir_proxy_receiver
+    receiver_frequency: 38kHz
+    remote_receiver_id: ir_rx
+
+# Entidades RF nativas de HA (HAIR no las usa todavia; sirven para
+# otras integraciones o para uso futuro)
+radio_frequency:
+  - platform: ir_rf_proxy
+    name: "433MHz RF Transmitter"
+    id: rf_proxy_transmitter
+    frequency: 433.92MHz
+    remote_transmitter_id: rf_tx
+  - platform: ir_rf_proxy
+    name: "433MHz RF Receiver"
+    id: rf_proxy_receiver
+    frequency: 433.92MHz
+    remote_receiver_id: rf_rx
+
+# Solo para HA 2026.4-2026.5 (sin receptor nativo): agrega dentro del
+# remote_receiver "ir_rx" este puente para que el Sniffer de HAIR funcione:
+#
+#   on_pronto:
+#     then:
+#       - homeassistant.event:
+#           event: esphome.remote_received
+#           data:
+#             protocol: PRONTO
+#             code: !lambda 'return x.data;'
+#
+# En HA 2026.6+ NO lo uses (HAIR se suscribe a la entidad RX nativa).
 
 # ---------------------------------------------------------------------
 #  SCRIPTS
@@ -430,6 +474,18 @@ rc522_i2c:
 # ---------------------------------------------------------------------
 switch:
   - platform: template
+    name: "Remote Raw"
+    id: remote_raw_enable
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    icon: mdi:remote
+    on_turn_off:
+      - lambda: |-
+          id(ir_analyzer).publish_state("IDLE");
+          id(rf_status).publish_state("Remote Raw apagado");
+    on_turn_on:
+      - lambda: 'id(rf_status).publish_state("RF listo");'
+  - platform: template
     name: "Notificar IR en HA"
     id: ir_notify
     optimistic: true
@@ -467,7 +523,7 @@ select:
     optimistic: true
     set_action:
       - lambda: |-
-          id(slot_idx) = x.back() - '1';
+          id(slot_idx) = x.c_str()[x.size() - 1] - '1';
           id(ir_slot_name).publish_state(std::string(&id(ir_names)[id(slot_idx) * 24]));
 
 text:
